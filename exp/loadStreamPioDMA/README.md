@@ -29,12 +29,15 @@ The report adds one line to loadStreamPio's. A run at 18.75 Mbps against echoPio
 Test 6 @ 18750000 baud: complete
   Sent 1024, received 1024 (dropped 0), 548 us, 14948905 bit/s
   Line use 99%, DMA send done at 549 us
+  Core busy N%, free M%
   Valid 1024, missing 0, corrupt 0, extra 0
   Overrun 0, framing 0, break 0, parity 0
 ```
 - `bit/s` counts data bits, 8 per character. Each character takes 10 bits on the wire (start, 8 data, stop), so the most it can show is 80% of the baud rate: 15 Mbit/s at 18.75 Mbps.
 - `Line use` compares the wire bits (10 per character) with the baud rate. 100% means no gaps. 1024 characters need at least 546 µs at 18.75 Mbps, so 548 µs is 99.6%, as the time includes the trip through the echo server.
 - `DMA send done` is when the main loop saw the DMA finish. At 18.75 Mbps the receive interrupt takes almost all of the CPU, so the main loop notices late. That is why it can show a time after the last byte came back.
+
+`Core busy` is measured as in [loadStreamPio](../loadStreamPio/README.md#core-load). The run above is from before it was added. Since then, at 18.75 Mbps it reports `Core busy 98%, free 2%`. The receive interrupt, one every 533 ns, takes almost all of the core. [loadStreamPioDMARx](../loadStreamPioDMARx/README.md) moves receive to DMA and frees it.
 
 For comparison, loadStreamPio, with the main loop feeding the FIFO, took about 718 µs (11.4 Mbit/s) for the same test.
 

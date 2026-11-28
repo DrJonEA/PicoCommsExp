@@ -65,5 +65,35 @@ With a loop jumper, the PIO UART has run with no loss at 18.75 Mbps.
 
 Between two boards at 18.75 Mbps, wiring matters. Long jumper wires and a single weak ground gave blocks of corrupt bytes, with no framing errors or overruns. Short wires and a solid ground connection between the boards fixed it.
 
+## Core load
+The report includes a `Core busy N%, free M%` line, which shows how much of the core the test takes. It is measured the way an RTOS measures CPU load:
+- During a test, whenever the main loop has nothing to do it spins for 64 cycles and counts one idle spin.
+- At startup a 20 ms calibration run, using the same test loop with nothing sent, measures the idle spin rate of a free core. The console prints `Idle calibration: N spins in M us`.
+- Free is the test's idle spin rate divided by the calibrated rate. Anything that takes the core lowers it: the receive interrupt, or the main loop feeding the transmit FIFO. The main loop's polling is in both runs, so it cancels out.
+
+To keep the figure clean, the console isn't polled and the OLED isn't refreshed during a test. Menu keys are read between tests.
+
+At 18.75 Mbps against echoPio the three PIO load tests report:
+
+| Example | Time for 1KB | Character rate | Core busy | Core time per character |
+|---|---|---|---|---|
+| loadStreamPio | 747 µs | 1.37 M/s | 92% | ~671 ns |
+| loadStreamPioDMA | 548 µs | 1.87 M/s | 98% | ~524 ns |
+| loadStreamPioDMARx | 548 µs | 1.87 M/s | 0% | ~0 ns |
+
+Read busy % with throughput. loadStreamPio looks less busy than loadStreamPioDMA only because it moves fewer characters a second. The core time per character is the fair comparison.
+
+In loadStreamPio the idle spin itself costs a little throughput. When the transmit FIFO is full the main loop spins for 64 cycles before refilling it, and a 1KB test went from about 718 µs to 747 µs once this was added.
+
+## Display
+The same as [loadStream](../loadStream/README.md#display), except that the bottom right shows the core free % from the last test in place of parity. Parity is always 0 on the PIO UART, so it is only reported on the console.
+```
+V1024 M0        valid       missing
+C0    R1024     corrupt     received
+O0    F0        overrun     framing
+B0    97%       break       core free %
+```
+It shows `--%` until the first test has run.
+
 ## Building
 The build target is `LoadStreamPio`. The two `.pio` files are turned into headers at build time with `pico_generate_pio_header`. See the [top-level README](../../README.md) for cloning and building.

@@ -71,6 +71,15 @@ static dma_channel_config dmaTxConfig;
 #define TEST_PERIOD_MS  10000				// Start a test every 10 seconds
 #define MATCH_LEN       4					// Bytes that must agree to resync
 
+// Core load. During a test, whenever the main loop has nothing to do it
+// spins for IDLE_SPIN_CYCLES and counts one idle spin. At startup a
+// calibration run with no traffic measures the idle spin rate of a free
+// core. During a test, free = idle spin rate / calibrated rate. Anything
+// that takes the core, interrupts or the main loop moving data, lowers the
+// rate. The main loop's polling is in both, so it cancels out
+#define IDLE_SPIN_CYCLES  64
+#define IDLE_CAL_US       20000
+
 // Baud rates selectable from the stdio menu, keys 0-9 then a-i.
 // The PIO programs take 8 clocks per bit, so the limit is clk_sys / 8
 // (18.75 Mbps at 150MHz). Up to 9375000 matches loadStream for comparison.
@@ -113,6 +122,9 @@ typedef struct {
 } TestResults;
 
 static TestResults results = {0, 0, 0, 0};
+
+// Core free % from the last test, for the display. -1 before the first
+static int32_t lastFreePct = -1;
 
 typedef enum {
 	TEST_IDLE,
@@ -441,7 +453,8 @@ void fmtShort(char *buf, size_t len, char label, uint32_t value) {
  *   Row 0: V valid      M missing
  *   Row 1: C corrupt    R received
  *   Row 2: O overrun    F framing
- *   Row 3: B break      P parity
+ *   Row 3: B break      core free % from the last test
+ * Parity is always 0, so it is only reported on the console
  * Metrics are read without disabling interrupts, so they may be from
  * slightly different moments, but each 32 bit value is read atomically.
  */
@@ -466,7 +479,11 @@ void drawStatus(ssd1306_t *pOled){
 
 	fmtShort(line, sizeof(line), 'B', metrics.breaks);
 	ssd1306_draw_string(pOled, 0, 48, 2, line);
-	fmtShort(line, sizeof(line), 'P', metrics.parity);
+	if (lastFreePct < 0) {
+		snprintf(line, sizeof(line), "--%%");
+	} else {
+		snprintf(line, sizeof(line), "%ld%%", (long)lastFreePct);
+	}
 	ssd1306_draw_string(pOled, col2, 48, 2, line);
 }
 
@@ -508,13 +525,29 @@ int main() {
 	uint32_t sentUs = 0;
 	uint32_t idleUs = 0;
 	uint32_t deadlineUs = 0;
+	uint32_t idleSpins = 0;		// Idle spins during the test
+	float idleRate = 0.0f;		// Idle spins per us with a free core
 	absolute_time_t nextTest = make_timeout_time_ms(1000);
 	absolute_time_t nextRefresh = get_absolute_time();
 
+	// Calibrate the idle spin rate. Run the waiting state with nothing
+	// sent, so it ends on the idle timeout after IDLE_CAL_US
+	bool calibrating = true;
+	idleUs = IDLE_CAL_US;
+	deadlineUs = IDLE_CAL_US * 2;
+	startUs = time_us_32();
+	sentUs = startUs;
+	state = TEST_WAITING;
+
 	while (true) { // Loop forever
-		// Poll stdio for menu selection. Only wait when idle so the test
-		// isn't slowed down
-		int c = getchar_timeout_us((state == TEST_IDLE) ? 10000 : 0);
+		bool didWork = false;	// Main loop moved data this time round
+
+		// Poll stdio for menu selection, only when idle so the console
+		// doesn't take core time during a test
+		int c = PICO_ERROR_TIMEOUT;
+		if (state == TEST_IDLE) {
+			c = getchar_timeout_us(10000);
+		}
 		if (c != PICO_ERROR_TIMEOUT) {
 			if ((c == 't') || (c == 'T')) {
 				nextTest = get_absolute_time();
@@ -564,6 +597,7 @@ int main() {
 				// Give up at twice the send time plus 500ms
 				deadlineUs = (sendUs * 2) + 500000;
 
+				idleSpins = 0;
 				startUs = time_us_32();
 				startDmaTx();
 				state = TEST_SENDING;
@@ -595,6 +629,27 @@ int main() {
 			}
 
 			if (reason != NULL) {
+				// Test window for the core load, before any wait for
+				// stragglers
+				uint32_t windowUs = now - startUs;
+
+				if (calibrating) {
+					calibrating = false;
+					idleRate = (windowUs > 0) ?
+							((float)idleSpins / (float)windowUs) : 0.0f;
+					printf("\nIdle calibration: %lu spins in %lu us\n> ",
+							(unsigned long)idleSpins, (unsigned long)windowUs);
+					state = TEST_IDLE;
+					break;
+				}
+
+				uint32_t freePct = 0;
+				if ((idleRate > 0.0f) && (windowUs > 0)) {
+					float f = (100.0f * (float)idleSpins) /
+							((float)windowUs * idleRate);
+					freePct = (f > 100.0f) ? 100 : (uint32_t)(f + 0.5f);
+				}
+				lastFreePct = (int32_t)freePct;
 				// Wait a little for any stragglers past TEST_LEN
 				if (count >= TEST_LEN) {
 					sleep_us(idleUs);
@@ -622,6 +677,8 @@ int main() {
 				printf("  Line use %lu%%, DMA send done at %lu us\n",
 						(unsigned long)linePct,
 						(unsigned long)(sentUs - startUs));
+				printf("  Core busy %lu%%, free %lu%%\n",
+						(unsigned long)(100 - freePct), (unsigned long)freePct);
 				printf("  Valid %lu, missing %lu, corrupt %lu, extra %lu\n",
 						(unsigned long)results.valid,
 						(unsigned long)results.missing,
@@ -639,9 +696,16 @@ int main() {
 		}
 		}
 
-		// Refresh the screen every DELAY ms, but not while sending, to
-		// keep the main loop out of the way during the test
-		if ((state != TEST_SENDING) && time_reached(nextRefresh)) {
+		// Nothing to do this time round, so spin and count it as idle
+		if ((state != TEST_IDLE) && !didWork) {
+			busy_wait_at_least_cycles(IDLE_SPIN_CYCLES);
+			idleSpins++;
+		}
+
+		// Refresh the screen every DELAY ms, but not during a test. A
+		// refresh takes about 25ms of core time, which would distort the
+		// core load figure and the timing
+		if ((state == TEST_IDLE) && time_reached(nextRefresh)) {
 			nextRefresh = make_timeout_time_ms(DELAY);
 			if (res){
 				ssd1306_clear(&oled);

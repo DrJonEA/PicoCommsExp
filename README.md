@@ -37,6 +37,7 @@ The `exp` folder holds small stand-alone projects, each with its own README. ech
 | [loadStreamAux](exp/loadStreamAux/README.md) | loadStream on the UART_AUX pins | UART1 via UART_AUX | GP26 | GP27 |
 | [loadStreamPio](exp/loadStreamPio/README.md) | loadStream with a PIO UART | PIO | GP18 | GP19 |
 | [loadStreamPioDMA](exp/loadStreamPioDMA/README.md) | loadStreamPio with DMA transmit, no gaps | PIO + DMA | GP18 | GP19 |
+| [loadStreamPioDMARx](exp/loadStreamPioDMARx/README.md) | DMA for transmit and receive, core left free | PIO + DMA | GP18 | GP19 |
 
 ### oledTest
 Shows text on the OLED and blinks an LED on GP2. Use it to check the display wiring first.
@@ -58,3 +59,6 @@ The same load test using the PIO UART programs from [pico-examples](https://gith
 
 ### loadStreamPioDMA
 loadStreamPio with the PIO transmit FIFO fed by DMA. At 18.75 Mbps the main loop can't keep the FIFO full, which leaves gaps between characters and limits loadStreamPio to about 11 Mbit/s. With DMA the characters go out back to back. At 18.75 Mbps it moves 1KB in 548 µs, 14.95 Mbit/s, using 99.6% of the line with no errors.
+
+### loadStreamPioDMARx
+loadStreamPioDMA with receive moved to DMA too. In loadStreamPioDMA every received character raises an interrupt, which at 18.75 Mbps takes almost all of the core. Here a second DMA channel drains the receive FIFO, and the main loop just polls the count. At 18.75 Mbps it keeps the same 14.95 Mbit/s with the core 100% free.
