@@ -10,14 +10,14 @@ I have a blog that explains how to clone repos and build my projects on
 Each experiment in the `exp` folder is a stand-alone project and is built from its own folder.
 
 ## Hardware
-All of the experiments use the same setup on a Pico 2:
+All of the experiments run on a Pico 2 and share this setup:
 
 | Function | Pins | Notes |
 |---|---|---|
 | OLED display | GP12 (SDA), GP13 (SCL) | SSD1306 128x64 on I2C0, address 0x3C |
 | stdio console | GP16 (TX), GP17 (RX) | UART0, 115200 baud |
-| Test UART | GP20 (TX), GP21 (RX) | UART1, used by echo and loadStream |
-| LED | GP2 | oledTest only |
+
+The UART under test changes from one experiment to the next, see the table below.
 
 The OLED uses the [pico-ssd1306](https://github.com/daschr/pico-ssd1306) library, included as a submodule in `lib`.
 
@@ -26,55 +26,27 @@ The OLED uses the [pico-ssd1306](https://github.com/daschr/pico-ssd1306) library
 - `lib`: libraries (submodules)
 
 ## Experiments
-The `exp` folder holds small stand-alone projects. echo and loadStream are used as a pair, on two Picos.
+The `exp` folder holds small stand-alone projects, each with its own README. echo is the server end. The three loadStream experiments run the same load test against it, on a second Pico, using a different way of driving the UART each time.
+
+| Experiment | What it does | UART under test | TX | RX |
+|---|---|---|---|---|
+| [oledTest](exp/oledTest/README.md) | OLED display and LED bring-up | none | | |
+| [echo](exp/echo/README.md) | Echo server with error metrics | UART1 | GP20 | GP21 |
+| [loadStream](exp/loadStream/README.md) | 1KB load test against echo | UART1 | GP20 | GP21 |
+| [loadStreamAux](exp/loadStreamAux/README.md) | loadStream on the UART_AUX pins | UART1 via UART_AUX | GP26 | GP27 |
+| [loadStreamPio](exp/loadStreamPio/README.md) | loadStream with a PIO UART | PIO | GP18 | GP19 |
 
 ### oledTest
-Bring-up of the OLED display. It shows "Testing" with a line underneath, then blinks the LED on GP2 and shows "Blink" on the display in time with it, every 0.5 seconds. Use it to check the display wiring before moving on to the UART experiments.
+Shows text on the OLED and blinks an LED on GP2. Use it to check the display wiring first.
 
 ### echo
-An echo server on UART1 (TX GP20, RX GP21). Every character received is sent straight back out. Receiving is interrupt driven, and the interrupt sends the echo.
-
-The interrupt reads the UART data register directly so it can count the error flags that come with each character. Characters with a framing, break or parity error are counted but not echoed.
-
-The display refreshes every 0.5 seconds:
-```
-hello worl      last 10 characters received
-E:1234567       bytes echoed
-O:0   F:0       overrun     framing
-B:0   P:0       break       parity
-```
-Parity is never seen, as parity checking is not turned on. Counts over 999 in the error columns show as `1k+`.
-
-A menu on the stdio console selects the baud rate, from 9600 up to 9.375 Mbps (the UART maximum with the Pico 2's 150 MHz peripheral clock). Changing rate resets the UART, confirms the actual baud rate achieved, and clears the metrics and history.
+Echoes everything received on UART1 back out, from the receive interrupt. Counts bytes echoed and overrun, framing, break and parity errors, and shows them on the OLED with the last 10 characters received. The baud rate is selected from a console menu, from 9600 up to 9.375 Mbps.
 
 ### loadStream
-A load test for UART1, run against the echo server. Wire the two Picos together, TX to RX both ways, with a common ground:
+Sends 1KB of random printable characters to the echo server every 10 seconds and reads the echo back by interrupt. It then compares the two to count valid, missing, corrupt and extra bytes. Results and UART errors are shown on the OLED and reported on the console.
 
-| loadStream | echo |
-|---|---|
-| GP20 (TX) | GP21 (RX) |
-| GP21 (RX) | GP20 (TX) |
-| GND | GND |
+### loadStreamAux
+The same load test on GP26 and GP27. These are normally UART1's CTS and RTS pins. The RP2350's UART_AUX pin function turns them into UART1 TX and RX.
 
-Set both to the same baud rate. A test runs every 10 seconds, and `t` on the console runs one straight away. Each test:
-1. Clears all metrics and results.
-2. Builds 1KB of random printable characters.
-3. Streams it out of UART1 as fast as the UART will take it.
-4. Receives the echo by interrupt into a 1KB buffer plus 256 bytes of contingency.
-5. Stops once all the data is back, or no data has arrived for a short time, or an overall timeout expires.
-6. Compares what came back with what was sent.
-
-The comparison walks both buffers together. When they differ it works out whether a byte is corrupt (the data after it lines up), missing (the data lines up further on) or extra (an inserted byte).
-
-The display shows the results of the last test:
-```
-V1024 M0        valid       missing
-C0    R1024     corrupt     received
-O0    F0        overrun     framing
-B0    P0        break       parity
-```
-Counts over 9999 show as `>9k`.
-
-The console prints a full report for each test: the end reason, bytes sent and received, time, throughput in bit/s, the valid, missing, corrupt and extra counts, and the UART errors. It has the same baud rate menu as echo.
-
-The echo server does not return characters with a framing or break error, so those show up here as missing bytes.
+### loadStreamPio
+The same load test using the PIO UART programs from [pico-examples](https://github.com/raspberrypi/pico-examples/tree/master/pio), on GP18 and GP19. Errors come from the PIO itself, as there is no UART hardware to report them.
