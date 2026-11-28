@@ -484,8 +484,9 @@ int main() {
 							c, (unsigned long)requestedBaud,
 							(unsigned long)baud);
 					if (requestedBaud > HW_UART_MAX_BAUD) {
-						printf("Note: above the echo server's limit, "
-								"use a loop jumper GP%d to GP%d\n",
+						printf("Note: above the hardware UART echo server's "
+								"limit, use echoPio or a loop jumper "
+								"GP%d to GP%d\n",
 								ECHO_TX_PIN, ECHO_RX_PIN);
 					}
 					printf("> ");

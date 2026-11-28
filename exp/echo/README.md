@@ -1,5 +1,5 @@
 # echo
-An echo server on UART1. Every character received is sent straight back out. It is the server end for the [loadStream](../loadStream/README.md), [loadStreamAux](../loadStreamAux/README.md) and [loadStreamPio](../loadStreamPio/README.md) load tests.
+An echo server on UART1. Every character received is sent straight back out. It is the server end for the [loadStream](../loadStream/README.md), [loadStreamAux](../loadStreamAux/README.md) and [loadStreamPio](../loadStreamPio/README.md) load tests. [echoPio](../echoPio/README.md) is the same server on a PIO UART, for rates above 9.375 Mbps.
 
 ## Wiring
 | Function | Pins | Notes |

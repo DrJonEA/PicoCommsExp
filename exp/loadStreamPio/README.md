@@ -55,9 +55,15 @@ These are the same as [loadStream](../loadStream/README.md#the-test). The baud r
 
 A rate with a fractional divider, such as 12.5M, makes some bits one PIO clock (1/8 bit) longer than others. Only whole-number dividers give even bit lengths.
 
-The echo server is a hardware UART and stops at 9.375 Mbps. For the two faster rates, test the PIO UART on its own with a loop jumper from GP18 (TX) to GP19 (RX), in place of the echo server. The console reminds you of this when you select one of them.
+The [echo](../echo/README.md) server is a hardware UART and stops at 9.375 Mbps. For the two faster rates, use one of these:
+- [echoPio](../echoPio/README.md), the echo server on a PIO UART, wired the same way as echo
+- a loop jumper from GP18 (TX) to GP19 (RX), to test the PIO UART on its own
+
+The console reminds you of this when you select one of them.
 
 With a loop jumper, the PIO UART has run with no loss at 18.75 Mbps.
+
+Between two boards at 18.75 Mbps, wiring matters. Long jumper wires and a single weak ground gave blocks of corrupt bytes, with no framing errors or overruns. Short wires and a solid ground connection between the boards fixed it.
 
 ## Building
 The build target is `LoadStreamPio`. The two `.pio` files are turned into headers at build time with `pico_generate_pio_header`. See the [top-level README](../../README.md) for cloning and building.
